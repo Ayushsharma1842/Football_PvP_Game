@@ -1,4 +1,4 @@
-import { createContext, useContext } from 'react';
+import { createContext, useContext, useEffect, useState } from 'react';
 import { useGameStore } from '@/stores/gameStore';
 import { useAuth } from '@/hooks/useAuth';
 import { useClips } from '@/hooks/useClips';
@@ -6,6 +6,12 @@ import { HomeScreen } from '@/screens/HomeScreen';
 import { GameScreen } from '@/screens/GameScreen';
 import { ResultsScreen } from '@/screens/ResultsScreen';
 import { ClipWithAnswer } from '@/types/game';
+
+// Get code from URL params
+function getCodeFromUrl(): string | null {
+  const params = new URLSearchParams(window.location.search);
+  return params.get('code');
+}
 
 // Context for clips data
 interface ClipsContextType {
@@ -28,6 +34,17 @@ function App() {
   const { currentScreen } = useGameStore();
   const { isLoading: authLoading } = useAuth();
   const { clips, isLoading: clipsLoading, refetch } = useClips();
+  const [inviteCode, setInviteCode] = useState<string | null>(null);
+
+  // Check for invite code in URL on mount
+  useEffect(() => {
+    const code = getCodeFromUrl();
+    if (code) {
+      setInviteCode(code.toUpperCase());
+      // Clear the URL parameter without reload
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, []);
 
   // Show loading while Firebase auth and clips initialize
   if (authLoading || clipsLoading) {
@@ -59,7 +76,12 @@ function App() {
 
   return (
     <ClipsContext.Provider value={{ clips, isLoading: clipsLoading, refetch }}>
-      {currentScreen === 'home' && <HomeScreen />}
+      {currentScreen === 'home' && (
+        <HomeScreen 
+          inviteCode={inviteCode} 
+          clearInviteCode={() => setInviteCode(null)} 
+        />
+      )}
       {currentScreen === 'game' && <GameScreen />}
       {currentScreen === 'results' && <ResultsScreen />}
     </ClipsContext.Provider>

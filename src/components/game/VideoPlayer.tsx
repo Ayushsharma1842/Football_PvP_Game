@@ -7,6 +7,8 @@ interface VideoPlayerProps {
   src: string;
   onFirstPlayComplete?: () => void; // Called after 1st play - user can now answer
   onAllPlaysComplete?: () => void; // Called after video plays twice
+  onVideoLoaded?: () => void; // Called when video metadata is loaded (for sync)
+  canPlay?: boolean; // External control: should video start playing?
   className?: string;
 }
 
@@ -14,6 +16,8 @@ export function VideoPlayer({
   src, 
   onFirstPlayComplete,
   onAllPlaysComplete,
+  onVideoLoaded,
+  canPlay = true, // Default to true for backward compatibility (practice mode)
   className,
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -23,6 +27,8 @@ export function VideoPlayer({
   const [playCount, setPlayCount] = useState(0);
   const [isLocked, setIsLocked] = useState(false);
   const [currentPlay, setCurrentPlay] = useState(1);
+  const [hasSignaledLoaded, setHasSignaledLoaded] = useState(false);
+  const [hasStartedPlaying, setHasStartedPlaying] = useState(false);
 
   const handleVideoEnded = useCallback(() => {
     const video = videoRef.current;
@@ -51,10 +57,20 @@ export function VideoPlayer({
 
     const handleCanPlay = () => {
       setIsReady(true);
-      // Auto-play when ready
-      video.play().catch(() => {
-        // Autoplay failed, user needs to interact
-      });
+      
+      // Signal that video is loaded (for sync)
+      if (!hasSignaledLoaded) {
+        setHasSignaledLoaded(true);
+        onVideoLoaded?.();
+      }
+      
+      // Only auto-play if canPlay is true (sync allows it)
+      if (canPlay && !hasStartedPlaying) {
+        setHasStartedPlaying(true);
+        video.play().catch(() => {
+          // Autoplay failed, user needs to interact
+        });
+      }
     };
 
     const handleTimeUpdate = () => {
@@ -72,7 +88,19 @@ export function VideoPlayer({
       video.removeEventListener('ended', handleVideoEnded);
       video.removeEventListener('timeupdate', handleTimeUpdate);
     };
-  }, [handleVideoEnded]);
+  }, [handleVideoEnded, canPlay, hasSignaledLoaded, hasStartedPlaying, onVideoLoaded]);
+  
+  // Start playing when canPlay becomes true (for sync mode)
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !isReady || !canPlay || hasStartedPlaying) return;
+    
+    console.log('Sync: Starting video playback');
+    setHasStartedPlaying(true);
+    video.play().catch(() => {
+      // Autoplay failed
+    });
+  }, [canPlay, isReady, hasStartedPlaying]);
 
   // Reset when src changes
   useEffect(() => {
@@ -80,6 +108,9 @@ export function VideoPlayer({
     setIsLocked(false);
     setCurrentPlay(1);
     setProgress(0);
+    setIsReady(false);
+    setHasSignaledLoaded(false);
+    setHasStartedPlaying(false);
   }, [src]);
 
   const toggleMute = () => {
@@ -113,9 +144,11 @@ export function VideoPlayer({
       />
 
       {/* Loading overlay */}
-      {!isReady && (
+      {(!isReady || (isReady && !canPlay)) && (
         <div className="absolute inset-0 flex items-center justify-center bg-var-dark/80">
-          <div className="animate-pulse text-var-glow">Loading...</div>
+          <div className="animate-pulse text-var-glow">
+            {!isReady ? 'Loading...' : 'Ready...'}
+          </div>
         </div>
       )}
 

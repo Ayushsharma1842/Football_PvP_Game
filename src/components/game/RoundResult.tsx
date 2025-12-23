@@ -3,6 +3,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Check, X, Clock, Zap, Loader2 } from 'lucide-react';
 import { RoundResult as RoundResultType, DECISIONS } from '@/types/game';
 import { cn } from '@/lib/utils';
+import { useGameStore } from '@/stores/gameStore';
+import { calculateRoundScore } from '@/lib/scoring';
 
 const AUTO_ADVANCE_SECONDS = 7;
 const REVEAL_DELAY_MS = 2000; // 2 seconds to build suspense
@@ -10,29 +12,89 @@ const REVEAL_DELAY_MS = 2000; // 2 seconds to build suspense
 interface RoundResultProps {
   result: RoundResultType;
   onContinue: () => void;
+  isAsyncMatch?: boolean;
 }
 
-export function RoundResult({ result, onContinue }: RoundResultProps) {
-  const [phase, setPhase] = useState<'waiting' | 'revealed'>('waiting');
-  const [timeRemaining, setTimeRemaining] = useState(AUTO_ADVANCE_SECONDS);
+export function RoundResult({ result, onContinue, isAsyncMatch = false }: RoundResultProps) {
+  const { opponentAnswers, speedBonusWindowMs } = useGameStore();
   
   const { 
     clip, 
     playerAnswer, 
-    opponentAnswer, 
     correctAnswer, 
     playerScore, 
-    opponentScore 
   } = result;
-
-  // Reveal after delay
+  
+  // For async matches, check if opponent has answered this round
+  const opponentLiveAnswer = isAsyncMatch ? opponentAnswers[result.roundIndex] : null;
+  const hasOpponentAnswered = isAsyncMatch ? !!opponentLiveAnswer : true;
+  
+  // Calculate opponent score from live answer
+  const opponentScore = isAsyncMatch && opponentLiveAnswer 
+    ? calculateRoundScore(
+        {
+          decision: opponentLiveAnswer.decision,
+          responseTimeMs: opponentLiveAnswer.responseTimeMs,
+          submittedAt: 0,
+          timedOut: opponentLiveAnswer.timedOut,
+        },
+        correctAnswer,
+        speedBonusWindowMs
+      )
+    : result.opponentScore;
+  
+  const opponentAnswer = isAsyncMatch && opponentLiveAnswer
+    ? {
+        decision: opponentLiveAnswer.decision,
+        responseTimeMs: opponentLiveAnswer.responseTimeMs,
+        submittedAt: 0,
+        timedOut: opponentLiveAnswer.timedOut,
+      }
+    : result.opponentAnswer;
+  
+  // Phase logic:
+  // - Practice: wait 2s then reveal
+  // - Async with opponent answer: reveal immediately
+  // - Async without opponent answer: stay in waiting
+  const [phase, setPhase] = useState<'waiting' | 'revealed'>(() => {
+    if (!isAsyncMatch) return 'waiting'; // Practice starts in waiting, reveals after delay
+    if (hasOpponentAnswered) return 'revealed'; // Async with answer goes straight to revealed
+    return 'waiting'; // Async without answer waits
+  });
+  
+  const [timeRemaining, setTimeRemaining] = useState(AUTO_ADVANCE_SECONDS);
+  
+  // Debug logging
   useEffect(() => {
+    if (isAsyncMatch) {
+      console.log('RoundResult Debug:', {
+        roundIndex: result.roundIndex,
+        opponentAnswersLength: opponentAnswers.length,
+        opponentLiveAnswer,
+        hasOpponentAnswered,
+        phase,
+      });
+    }
+  }, [isAsyncMatch, result.roundIndex, opponentAnswers.length, opponentLiveAnswer, hasOpponentAnswered, phase]);
+
+  // Watch for opponent answer in async mode
+  useEffect(() => {
+    if (isAsyncMatch && hasOpponentAnswered && phase === 'waiting') {
+      console.log('Opponent answered! Revealing results...');
+      setPhase('revealed');
+    }
+  }, [isAsyncMatch, hasOpponentAnswered, phase]);
+
+  // Reveal after delay (only for practice matches)
+  useEffect(() => {
+    if (isAsyncMatch) return; // Skip delay for async matches
+    
     const timeout = setTimeout(() => {
       setPhase('revealed');
     }, REVEAL_DELAY_MS);
 
     return () => clearTimeout(timeout);
-  }, []);
+  }, [isAsyncMatch]);
 
   // Auto-advance timer (only starts after reveal)
   useEffect(() => {
@@ -204,7 +266,7 @@ export function RoundResult({ result, onContinue }: RoundResultProps) {
           <motion.div
             className={cn(
               "p-4 rounded-lg border-2",
-              phase === 'waiting'
+              phase === 'waiting' || (isAsyncMatch && !hasOpponentAnswered)
                 ? "border-var-border bg-var-card"
                 : opponentScore.isCorrect
                   ? "border-green-500 bg-green-500/10"
@@ -216,7 +278,13 @@ export function RoundResult({ result, onContinue }: RoundResultProps) {
           >
             <div className="text-sm text-gray-400 mb-3">Opponent</div>
             
-            {phase === 'waiting' ? (
+            {isAsyncMatch && !hasOpponentAnswered ? (
+              // Async match: waiting for opponent
+              <div className="flex items-center gap-2 text-gray-400">
+                <Loader2 className="w-5 h-5 animate-spin" />
+                <span className="text-sm">Waiting for answer...</span>
+              </div>
+            ) : phase === 'waiting' ? (
               <div className="flex items-center gap-2 text-gray-400">
                 <Loader2 className="w-5 h-5 animate-spin" />
                 <span>Thinking...</span>
@@ -242,8 +310,8 @@ export function RoundResult({ result, onContinue }: RoundResultProps) {
               </motion.div>
             )}
 
-            {/* Score - only show after reveal */}
-            {phase === 'revealed' && (
+            {/* Score - show after reveal when opponent has answered */}
+            {phase === 'revealed' && hasOpponentAnswered && (
               <motion.div 
                 className="mt-4 pt-4 border-t border-white/10"
                 initial={{ opacity: 0 }}
@@ -268,6 +336,15 @@ export function RoundResult({ result, onContinue }: RoundResultProps) {
                   </div>
                 )}
               </motion.div>
+            )}
+
+            {/* Async match waiting: show info text */}
+            {isAsyncMatch && !hasOpponentAnswered && (
+              <div className="mt-4 pt-4 border-t border-white/10">
+                <p className="text-xs text-gray-500">
+                  Will reveal when opponent answers
+                </p>
+              </div>
             )}
           </motion.div>
         </div>
@@ -302,24 +379,19 @@ export function RoundResult({ result, onContinue }: RoundResultProps) {
           )}
         </AnimatePresence>
 
-        {/* Continue Button */}
+        {/* Status Footer */}
         <div className="p-6 border-t border-var-border">
           {phase === 'waiting' ? (
+            // Waiting for opponent
             <div className="w-full py-3 px-6 bg-var-card border border-var-border text-gray-500 font-bold rounded-lg text-center flex items-center justify-center gap-2">
               <Loader2 className="w-5 h-5 animate-spin" />
               Waiting for opponent...
             </div>
           ) : (
-            <motion.button
-              onClick={onContinue}
-              className="w-full py-3 px-6 bg-var-glow text-var-dark font-bold rounded-lg hover:bg-var-glow/90 transition-colors"
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-            >
-              Continue ({Math.ceil(timeRemaining)}s)
-            </motion.button>
+            // Both answered - show countdown to next round
+            <div className="w-full py-3 px-6 bg-var-card border border-var-border text-gray-400 font-medium rounded-lg text-center">
+              Next round in {Math.ceil(timeRemaining)}s...
+            </div>
           )}
         </div>
       </motion.div>

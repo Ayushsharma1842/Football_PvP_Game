@@ -1,5 +1,6 @@
 import { useEffect, useCallback, useState } from 'react';
 import { motion } from 'framer-motion';
+import { Loader2 } from 'lucide-react';
 import { useGameStore } from '@/stores/gameStore';
 import { useTimer } from '@/hooks/useTimer';
 import { GAME_CONFIG } from '@/types/game';
@@ -19,6 +20,8 @@ export function GameScreen() {
     nextRound,
     getCurrentClip,
     startAnswerWindow,
+    signalVideoLoaded,
+    canPlayVideo,
   } = useGameStore();
 
   const currentClip = getCurrentClip();
@@ -26,6 +29,7 @@ export function GameScreen() {
   // Track video playback state
   const [canAnswer, setCanAnswer] = useState(false); // After 1st play
   const [videoLocked, setVideoLocked] = useState(false); // After 2nd play
+  const [videoLoaded, setVideoLoaded] = useState(false); // Video metadata loaded
 
   // Timer for answering - starts after 1st play ends
   // Window = 2nd play duration + 10 seconds answer time
@@ -61,9 +65,20 @@ export function GameScreen() {
     if (match?.status === 'playing') {
       setCanAnswer(false);
       setVideoLocked(false);
+      setVideoLoaded(false);
       resetTimer();
     }
   }, [match?.currentRoundIndex, match?.status, resetTimer]);
+  
+  // Handle video loaded - signal to Firebase
+  const handleVideoLoaded = useCallback(() => {
+    console.log('Video loaded, signaling ready...');
+    setVideoLoaded(true);
+    signalVideoLoaded();
+  }, [signalVideoLoaded]);
+  
+  // For async matches: start video when both players are ready
+  const canStartVideo = match?.mode === 'async' ? canPlayVideo() : true;
 
   // Handle submit button click
   const handleSubmit = () => {
@@ -93,7 +108,11 @@ export function GameScreen() {
     <div className="min-h-screen gradient-bg">
       {/* Show round result overlay */}
       {match.status === 'round_result' && lastRoundResult && (
-        <RoundResult result={lastRoundResult} onContinue={nextRound} />
+        <RoundResult 
+          result={lastRoundResult} 
+          onContinue={nextRound} 
+          isAsyncMatch={match.mode === 'async'}
+        />
       )}
 
       <div className="max-w-4xl mx-auto p-4 md:p-6 space-y-6">
@@ -116,6 +135,8 @@ export function GameScreen() {
               src={currentClip.videoUrl}
               onFirstPlayComplete={handleFirstPlayComplete}
               onAllPlaysComplete={handleAllPlaysComplete}
+              onVideoLoaded={handleVideoLoaded}
+              canPlay={canStartVideo}
             />
             
             {/* Clip Info */}
@@ -140,7 +161,23 @@ export function GameScreen() {
         </div>
 
         {/* Status Message */}
-        {!canAnswer && (
+        {match.mode === 'async' && !canStartVideo && (
+          <motion.div
+            className="text-center py-4 bg-var-card border border-var-border rounded-lg"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+          >
+            <div className="flex items-center justify-center gap-2 text-blue-400">
+              <Loader2 className="w-5 h-5 animate-spin" />
+              <p>Loading...</p>
+            </div>
+            <p className="text-sm text-gray-500 mt-1">
+              {videoLoaded ? 'Syncing with opponent...' : 'Preparing video...'}
+            </p>
+          </motion.div>
+        )}
+        
+        {(match.mode !== 'async' || canStartVideo) && !canAnswer && (
           <motion.div
             className="text-center py-4 bg-var-card border border-var-border rounded-lg"
             initial={{ opacity: 0 }}
