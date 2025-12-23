@@ -1,0 +1,168 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-dark: #0a0e17;
+  --bg-card: #131a2b;
+  --bg-elevated: #1a2235;
+  --accent-var: #00ff88;
+  --accent-correct: #22c55e;
+  --accent-wrong: #ef4444;
+  --card-yellow: #facc15;
+  --card-red: #dc2626;
+  --text-primary: #f8fafc;
+  --text-muted: #64748b;
+  --border-glow: rgba(0, 255, 136, 0.3);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Inter', sans-serif;
+  background-color: var(--bg-dark);
+  color: var(--text-primary);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Scanline overlay effect for VAR room feel */
+.scanlines {
+  position: relative;
+}
+
+.scanlines::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.1) 2px,
+    rgba(0, 0, 0, 0.1) 4px
+  );
+  pointer-events: none;
+  z-index: 10;
+}
+
+/* Glowing border effect */
+.glow-border {
+  box-shadow: 
+    0 0 20px var(--border-glow),
+    inset 0 0 20px rgba(0, 255, 136, 0.05);
+  border: 1px solid rgba(0, 255, 136, 0.3);
+}
+
+.glow-border-active {
+  box-shadow: 
+    0 0 30px rgba(0, 255, 136, 0.5),
+    inset 0 0 30px rgba(0, 255, 136, 0.1);
+  border: 1px solid rgba(0, 255, 136, 0.6);
+}
+
+/* Button hover glow */
+.btn-glow {
+  transition: all 0.2s ease;
+}
+
+.btn-glow:hover {
+  box-shadow: 0 0 25px var(--border-glow);
+  transform: translateY(-2px);
+}
+
+.btn-glow:active {
+  transform: translateY(0);
+}
+
+/* Video container styling */
+.video-container {
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #000;
+}
+
+.video-container video {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* Countdown timer circular progress */
+.timer-ring {
+  transform: rotate(-90deg);
+  transform-origin: center;
+}
+
+/* Score display - scoreboard style */
+.scoreboard {
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 0.05em;
+}
+
+/* Card icons */
+.card-yellow {
+  background: linear-gradient(135deg, #facc15 0%, #eab308 100%);
+  border-radius: 3px;
+}
+
+.card-red {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  border-radius: 3px;
+}
+
+/* Decision button grid */
+.decision-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+@media (max-width: 640px) {
+  .decision-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* Animated gradient background */
+.gradient-bg {
+  background: 
+    radial-gradient(ellipse at top left, rgba(0, 255, 136, 0.1) 0%, transparent 50%),
+    radial-gradient(ellipse at bottom right, rgba(0, 100, 255, 0.05) 0%, transparent 50%),
+    var(--bg-dark);
+}
+
+/* Result reveal animation */
+@keyframes reveal-correct {
+  0% {
+    background-color: var(--bg-card);
+  }
+  100% {
+    background-color: rgba(34, 197, 94, 0.2);
+    border-color: var(--accent-correct);
+  }
+}
+
+@keyframes reveal-wrong {
+  0% {
+    background-color: var(--bg-card);
+  }
+  100% {
+    background-color: rgba(239, 68, 68, 0.2);
+    border-color: var(--accent-wrong);
+  }
+}
+
+.reveal-correct {
+  animation: reveal-correct 0.5s ease forwards;
+}
+
+.reveal-wrong {
+  animation: reveal-wrong 0.5s ease forwards;
+}
+
