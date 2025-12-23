@@ -82,6 +82,12 @@ export function VideoPlayer({
     video.addEventListener('canplay', handleCanPlay);
     video.addEventListener('ended', handleVideoEnded);
     video.addEventListener('timeupdate', handleTimeUpdate);
+    
+    // IMPORTANT: Check if video is already ready (cached video race condition fix)
+    // readyState >= 3 means HAVE_FUTURE_DATA or better (enough data to play)
+    if (video.readyState >= 3 && !hasSignaledLoaded) {
+      handleCanPlay();
+    }
 
     return () => {
       video.removeEventListener('canplay', handleCanPlay);
@@ -95,14 +101,13 @@ export function VideoPlayer({
     const video = videoRef.current;
     if (!video || !isReady || !canPlay || hasStartedPlaying) return;
     
-    console.log('Sync: Starting video playback');
     setHasStartedPlaying(true);
     video.play().catch(() => {
       // Autoplay failed
     });
   }, [canPlay, isReady, hasStartedPlaying]);
 
-  // Reset when src changes
+  // Reset when src changes (new video for new round)
   useEffect(() => {
     setPlayCount(0);
     setIsLocked(false);

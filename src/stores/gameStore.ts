@@ -125,15 +125,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const { firestoreMatchId, isPlayer1 } = get();
     if (!firestoreMatchId) return;
     
-    console.log('Subscribing to match updates for sync... isPlayer1:', isPlayer1);
-    
     const unsubscribe = subscribeToMatch(firestoreMatchId, (firebaseMatch) => {
-      if (!firebaseMatch) {
-        console.log('Match update: match is null');
-        return;
-      }
-      
-      console.log('=== MATCH UPDATE RECEIVED ===');
+      if (!firebaseMatch) return;
       
       const { match: localMatch, syncState: currentSync } = get();
       
@@ -141,14 +134,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
       if (firebaseMatch.sync) {
         const newSync = firebaseMatch.sync;
         
-        // Log state changes
-        if (!currentSync || currentSync.roundState !== newSync.roundState) {
-          console.log('Sync state changed:', newSync.roundState, 'round:', newSync.currentRound);
-        }
-        
         // Detect round advancement from Firebase
         if (localMatch && currentSync && newSync.currentRound > currentSync.currentRound) {
-          console.log('*** FIREBASE ROUND ADVANCED! Moving to round', newSync.currentRound + 1);
           set({
             match: {
               ...localMatch,
@@ -163,7 +150,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
         
         // Detect match completion
         if (newSync.roundState === 'completed' && localMatch?.status !== 'completed') {
-          console.log('*** MATCH COMPLETED! ***');
           set({
             match: localMatch ? { ...localMatch, status: 'completed' } : null,
             currentScreen: 'results',
@@ -177,28 +163,21 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const opponentKey = isPlayer1 ? 'player2' : 'player1';
       const opponentData = firebaseMatch[opponentKey];
       
-      console.log('Looking for opponent:', opponentKey);
-      console.log('Opponent answers raw:', opponentData?.answers);
-      
       if (opponentData) {
         // Handle both array and object formats from Firestore
         let newAnswers = opponentData.answers || [];
         
         // Firestore can return arrays as objects with numeric keys
         if (newAnswers && !Array.isArray(newAnswers)) {
-          console.log('Converting object to array...');
           newAnswers = Object.values(newAnswers);
         }
         
         const newScore = opponentData.totalScore || 0;
         
-        console.log('Opponent answer count:', newAnswers.length);
-        
         const { opponentAnswers: currentAnswers } = get();
         
         // Always update if there's new data
         if (newAnswers.length > 0 && newAnswers.length !== currentAnswers.length) {
-          console.log('*** UPDATING OPPONENT ANSWERS ***');
           set({ 
             opponentAnswers: newAnswers,
             opponentTotalScoreLive: newScore,
@@ -211,10 +190,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
   },
 
   startAsyncMatch: (matchId: string, firestoreMatch: FirestoreMatch, isPlayer1: boolean, clips: ClipWithAnswer[]) => {
-    console.log('=== START ASYNC MATCH ===');
-    console.log('isPlayer1:', isPlayer1);
-    console.log('Match clipIds from Firebase:', firestoreMatch.clipIds);
-    
     const player: Player = {
       id: isPlayer1 ? firestoreMatch.player1.uid : firestoreMatch.player2!.uid,
       name: isPlayer1 ? firestoreMatch.player1.name : firestoreMatch.player2!.name,
@@ -231,13 +206,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
     // The clipIds are stored in Firebase when match is created
     // Both players fetch the SAME clipIds, ensuring identical clip order
     const clipSet = getClipsByIdsFromArray(clips, firestoreMatch.clipIds);
-    
-    console.log('=== CLIP VERIFICATION ===');
-    console.log('ClipIds from Firebase:', firestoreMatch.clipIds);
-    console.log('Loaded clips in order:');
-    clipSet.forEach((clip, i) => {
-      console.log(`  Round ${i + 1}: ${clip.id} - "${clip.title}"`);
-    });
 
     const match: MatchState = {
       id: matchId,
@@ -554,7 +522,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
     if (match.mode === 'async' && firestoreMatchId) {
       try {
         await signalReadyForNextRound(firestoreMatchId, isPlayer1);
-        console.log('Signaled ready for next round');
       } catch (error) {
         console.error('Failed to signal ready for next round:', error);
       }

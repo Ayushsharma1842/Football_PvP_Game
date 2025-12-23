@@ -116,10 +116,6 @@ export async function joinMatchByCode(
   userId: string,
   playerName: string
 ): Promise<{ matchId: string; match: FirestoreMatch } | null> {
-  console.log('=== FIRESTORE JOIN DEBUG ===');
-  console.log('Looking for shareCode:', shareCode.toUpperCase());
-  console.log('Joiner userId:', userId);
-  
   const matchesRef = collection(db, 'matches');
   const q = query(
     matchesRef, 
@@ -129,23 +125,15 @@ export async function joinMatchByCode(
   
   const snapshot = await getDocs(q);
   
-  console.log('Query results:', snapshot.size, 'matches found');
-  
   if (snapshot.empty) {
-    console.log('No match found with this code and status');
     return null;
   }
   
   const matchDoc = snapshot.docs[0];
   const matchData = matchDoc.data() as FirestoreMatch;
   
-  console.log('Match found:', matchDoc.id);
-  console.log('Match creator (player1.uid):', matchData.player1.uid);
-  console.log('Are they the same?', matchData.player1.uid === userId);
-  
   // Don't let same user join their own match
   if (matchData.player1.uid === userId) {
-    console.log('BLOCKED: Same user trying to join own match');
     throw new Error('Cannot join your own match');
   }
   
@@ -164,8 +152,6 @@ export async function joinMatchByCode(
       roundStartTime: null,
     },
   });
-  
-  console.log('Match joined successfully!');
   
   // Return updated match data with player2 included
   const updatedMatch: FirestoreMatch = {
@@ -312,8 +298,6 @@ export async function submitRoundAnswer(
     [`${playerKey}.answers`]: updatedAnswers,
     [`${playerKey}.totalScore`]: newTotalScore,
   });
-  
-  console.log(`Round ${roundIndex + 1} answer saved for ${playerKey}`);
 }
 
 // ==========================================
@@ -333,8 +317,6 @@ export async function signalVideoReady(
     [`sync.${playerKey}`]: true,
   });
   
-  console.log(`Player ${isPlayer1 ? '1' : '2'} video ready signaled`);
-  
   // Now read the updated state to check if both are ready
   const matchSnap = await getDoc(matchRef);
   if (!matchSnap.exists()) return;
@@ -351,7 +333,6 @@ export async function signalVideoReady(
       'sync.roundState': 'playing',
       'sync.roundStartTime': Date.now(),
     });
-    console.log('Both players ready! Starting video playback...');
   }
 }
 
@@ -379,8 +360,6 @@ export async function signalReadyForNextRound(
     [`sync.${playerKey}`]: true,
   });
   
-  console.log(`Player ${isPlayer1 ? '1' : '2'} ready for next round`);
-  
   // Now read the updated state to check if both are ready
   const matchSnap = await getDoc(matchRef);
   if (!matchSnap.exists()) return;
@@ -403,7 +382,6 @@ export async function signalReadyForNextRound(
         'status': 'completed',
         'sync.roundState': 'completed',
       });
-      console.log('Match completed!');
     } else {
       // Move to next round - reset all ready states
       await updateDoc(matchRef, {
@@ -415,7 +393,6 @@ export async function signalReadyForNextRound(
         'sync.player2ReadyForNext': false,
         'sync.roundStartTime': null,
       });
-      console.log('Both players ready! Advancing to round', nextRoundIndex + 1);
     }
   }
 }

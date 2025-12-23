@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState } from 'react';
+import { useEffect, useCallback, useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { Loader2 } from 'lucide-react';
 import { useGameStore } from '@/stores/gameStore';
@@ -25,6 +25,13 @@ export function GameScreen() {
   } = useGameStore();
 
   const currentClip = getCurrentClip();
+  
+  // Get next clip for preloading
+  const nextClip = useMemo(() => {
+    if (!match) return null;
+    const nextIndex = match.currentRoundIndex + 1;
+    return match.clipSet[nextIndex] || null;
+  }, [match]);
   
   // Track video playback state
   const [canAnswer, setCanAnswer] = useState(false); // After 1st play
@@ -70,9 +77,28 @@ export function GameScreen() {
     }
   }, [match?.currentRoundIndex, match?.status, resetTimer]);
   
+  // Preload next video in background
+  useEffect(() => {
+    if (!nextClip) return;
+    
+    // Create a hidden video element to preload
+    const preloadVideo = document.createElement('video');
+    preloadVideo.preload = 'auto';
+    preloadVideo.src = nextClip.videoUrl;
+    preloadVideo.muted = true;
+    
+    // Start loading
+    preloadVideo.load();
+    
+    return () => {
+      // Cleanup
+      preloadVideo.src = '';
+      preloadVideo.load();
+    };
+  }, [nextClip]);
+  
   // Handle video loaded - signal to Firebase
   const handleVideoLoaded = useCallback(() => {
-    console.log('Video loaded, signaling ready...');
     setVideoLoaded(true);
     signalVideoLoaded();
   }, [signalVideoLoaded]);

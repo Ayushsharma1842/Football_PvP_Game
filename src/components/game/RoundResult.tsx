@@ -64,23 +64,9 @@ export function RoundResult({ result, onContinue, isAsyncMatch = false }: RoundR
   
   const [timeRemaining, setTimeRemaining] = useState(AUTO_ADVANCE_SECONDS);
   
-  // Debug logging
-  useEffect(() => {
-    if (isAsyncMatch) {
-      console.log('RoundResult Debug:', {
-        roundIndex: result.roundIndex,
-        opponentAnswersLength: opponentAnswers.length,
-        opponentLiveAnswer,
-        hasOpponentAnswered,
-        phase,
-      });
-    }
-  }, [isAsyncMatch, result.roundIndex, opponentAnswers.length, opponentLiveAnswer, hasOpponentAnswered, phase]);
-
   // Watch for opponent answer in async mode
   useEffect(() => {
     if (isAsyncMatch && hasOpponentAnswered && phase === 'waiting') {
-      console.log('Opponent answered! Revealing results...');
       setPhase('revealed');
     }
   }, [isAsyncMatch, hasOpponentAnswered, phase]);

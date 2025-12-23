@@ -43,17 +43,11 @@ export function HomeScreen({ inviteCode, clearInviteCode }: HomeScreenProps) {
   useEffect(() => {
     if (!createdMatchId || modalType !== 'create') return;
     
-    console.log('Subscribing to match updates:', createdMatchId);
-    
     const unsubscribe = subscribeToMatch(createdMatchId, async (match) => {
       if (!match) return;
       
-      console.log('Match update received:', match.status, 'player2:', match.player2);
-      
       // When player2 joins (status changes from waiting_for_p2), start the game!
       if (match.player2 && match.status !== 'waiting_for_p2') {
-        console.log('Player 2 joined! Starting game for Player 1...');
-        
         // Start the game for Player 1
         startAsyncMatch(createdMatchId, match, true, clips);
         setModalType('none');
@@ -62,7 +56,6 @@ export function HomeScreen({ inviteCode, clearInviteCode }: HomeScreenProps) {
     });
     
     return () => {
-      console.log('Unsubscribing from match updates');
       unsubscribe();
     };
   }, [createdMatchId, modalType, clips, startAsyncMatch, clearInviteCode]);
@@ -87,9 +80,6 @@ export function HomeScreen({ inviteCode, clearInviteCode }: HomeScreenProps) {
     setIsLoading(true);
     setError('');
     
-    console.log('=== CREATE MATCH DEBUG ===');
-    console.log('Creator userId:', userId);
-    
     try {
       // Get random clip IDs for the match
       const shuffled = [...clips].sort(() => Math.random() - 0.5);
@@ -100,9 +90,6 @@ export function HomeScreen({ inviteCode, clearInviteCode }: HomeScreenProps) {
         name || 'Player',
         clipIds
       );
-      
-      console.log('Match created:', result);
-      console.log('Share code:', result.shareCode);
       
       setShareCode(result.shareCode);
       setCreatedMatchId(result.matchId);
@@ -121,10 +108,6 @@ export function HomeScreen({ inviteCode, clearInviteCode }: HomeScreenProps) {
     setIsLoading(true);
     setError('');
     
-    console.log('=== JOIN MATCH DEBUG ===');
-    console.log('Current userId:', userId);
-    console.log('Join code:', joinCode.trim().toUpperCase());
-    
     try {
       const result = await joinMatchByCode(
         joinCode.trim().toUpperCase(),
@@ -132,21 +115,16 @@ export function HomeScreen({ inviteCode, clearInviteCode }: HomeScreenProps) {
         name || 'Player'
       );
       
-      console.log('Join result:', result);
-      
       if (!result) {
         setError('Match not found. Check the code and try again.');
         return;
       }
-      
-      console.log('Player 2 joining with clipIds:', result.match.clipIds);
       
       // Start the async match immediately
       startAsyncMatch(result.matchId, result.match, false, clips);
       setModalType('none');
       clearInviteCode?.();
     } catch (err: unknown) {
-      console.error('Join error:', err);
       if (err instanceof Error && err.message === 'Cannot join your own match') {
         setError('You cannot join your own match!');
       } else {
