@@ -1,15 +1,20 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Play, Users, Trophy, Settings, Copy, Check, X, Loader2 } from 'lucide-react';
+import { Play, Users, Trophy, Settings, Copy, Check, X, Loader2, Link, Share2 } from 'lucide-react';
 import { useGameStore } from '@/stores/gameStore';
 import { useAuth } from '@/hooks/useAuth';
 import { useClipsContext } from '@/App';
 import { getPlayerName, setPlayerName } from '@/lib/utils';
-import { createAsyncMatch, joinMatchByCode } from '@/lib/firestore';
+import { createAsyncMatch, joinMatchByCode, subscribeToMatch } from '@/lib/firestore';
 
 type ModalType = 'none' | 'create' | 'join';
 
-export function HomeScreen() {
+interface HomeScreenProps {
+  inviteCode?: string | null;
+  clearInviteCode?: () => void;
+}
+
+export function HomeScreen({ inviteCode, clearInviteCode }: HomeScreenProps) {
   const { startPracticeMatch, startAsyncMatch } = useGameStore();
   const { userId } = useAuth();
   const { clips } = useClipsContext();
@@ -23,6 +28,44 @@ export function HomeScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [createdMatchId, setCreatedMatchId] = useState<string | null>(null);
+
+  // Auto-open join modal if invite code is present
+  useEffect(() => {
+    if (inviteCode) {
+      setJoinCode(inviteCode);
+      setModalType('join');
+    }
+  }, [inviteCode]);
+
+  // Subscribe to match updates when waiting for player 2
+  useEffect(() => {
+    if (!createdMatchId || modalType !== 'create') return;
+    
+    console.log('Subscribing to match updates:', createdMatchId);
+    
+    const unsubscribe = subscribeToMatch(createdMatchId, async (match) => {
+      if (!match) return;
+      
+      console.log('Match update received:', match.status, 'player2:', match.player2);
+      
+      // When player2 joins (status changes from waiting_for_p2), start the game!
+      if (match.player2 && match.status !== 'waiting_for_p2') {
+        console.log('Player 2 joined! Starting game for Player 1...');
+        
+        // Start the game for Player 1
+        startAsyncMatch(createdMatchId, match, true, clips);
+        setModalType('none');
+        clearInviteCode?.();
+      }
+    });
+    
+    return () => {
+      console.log('Unsubscribing from match updates');
+      unsubscribe();
+    };
+  }, [createdMatchId, modalType, clips, startAsyncMatch, clearInviteCode]);
 
   const handleStartPractice = () => {
     if (name.trim()) {
@@ -44,6 +87,9 @@ export function HomeScreen() {
     setIsLoading(true);
     setError('');
     
+    console.log('=== CREATE MATCH DEBUG ===');
+    console.log('Creator userId:', userId);
+    
     try {
       // Get random clip IDs for the match
       const shuffled = [...clips].sort(() => Math.random() - 0.5);
@@ -55,7 +101,11 @@ export function HomeScreen() {
         clipIds
       );
       
+      console.log('Match created:', result);
+      console.log('Share code:', result.shareCode);
+      
       setShareCode(result.shareCode);
+      setCreatedMatchId(result.matchId);
       setModalType('create');
     } catch (err) {
       setError('Failed to create match. Please try again.');
@@ -71,6 +121,10 @@ export function HomeScreen() {
     setIsLoading(true);
     setError('');
     
+    console.log('=== JOIN MATCH DEBUG ===');
+    console.log('Current userId:', userId);
+    console.log('Join code:', joinCode.trim().toUpperCase());
+    
     try {
       const result = await joinMatchByCode(
         joinCode.trim().toUpperCase(),
@@ -78,15 +132,21 @@ export function HomeScreen() {
         name || 'Player'
       );
       
+      console.log('Join result:', result);
+      
       if (!result) {
         setError('Match not found. Check the code and try again.');
         return;
       }
       
-      // Start the async match
+      console.log('Player 2 joining with clipIds:', result.match.clipIds);
+      
+      // Start the async match immediately
       startAsyncMatch(result.matchId, result.match, false, clips);
       setModalType('none');
+      clearInviteCode?.();
     } catch (err: unknown) {
+      console.error('Join error:', err);
       if (err instanceof Error && err.message === 'Cannot join your own match') {
         setError('You cannot join your own match!');
       } else {
@@ -104,12 +164,29 @@ export function HomeScreen() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleStartAsPlayer1 = () => {
-    // For now, just close the modal - in a full implementation,
-    // player 1 would wait for player 2 to join, then both play
-    // For MVP, we'll just let them start practice mode
-    setModalType('none');
-    handleStartPractice();
+  const handleCopyLink = () => {
+    const link = `${window.location.origin}?code=${shareCode}`;
+    navigator.clipboard.writeText(link);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2000);
+  };
+
+  const handleShare = async () => {
+    const link = `${window.location.origin}?code=${shareCode}`;
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: 'VAR Room Challenge',
+          text: `${name || 'Someone'} challenged you to a VAR Room duel!`,
+          url: link,
+        });
+      } catch (err) {
+        // User cancelled or share failed, fall back to copy
+        handleCopyLink();
+      }
+    } else {
+      handleCopyLink();
+    }
   };
 
   return (
@@ -261,6 +338,8 @@ export function HomeScreen() {
                   setError('');
                   setShareCode('');
                   setJoinCode('');
+                  setCreatedMatchId(null);
+                  clearInviteCode?.();
                 }}
                 className="absolute top-4 right-4 text-gray-400 hover:text-white"
               >
@@ -270,41 +349,70 @@ export function HomeScreen() {
               {/* Create Match - showing share code */}
               {modalType === 'create' && shareCode && (
                 <div className="text-center">
-                  <h2 className="text-2xl font-bold mb-2">Match Created!</h2>
-                  <p className="text-gray-400 mb-6">Share this code with your friend:</p>
+                  <h2 className="text-2xl font-bold mb-2">🎮 Challenge Created!</h2>
+                  <p className="text-gray-400 mb-6">Share with your friend:</p>
                   
-                  <div className="bg-var-elevated rounded-lg p-4 mb-6">
-                    <div className="text-4xl font-mono font-bold text-var-glow tracking-widest mb-2">
+                  {/* Code display */}
+                  <div className="bg-var-elevated rounded-lg p-4 mb-4">
+                    <div className="text-xs text-gray-500 mb-1">MATCH CODE</div>
+                    <div className="text-4xl font-mono font-bold text-var-glow tracking-widest">
                       {shareCode}
                     </div>
+                  </div>
+                  
+                  {/* Action buttons */}
+                  <div className="flex gap-2 mb-6">
                     <button
                       onClick={handleCopyCode}
-                      className="text-sm text-gray-400 hover:text-white flex items-center gap-1 mx-auto"
+                      className="flex-1 py-2 px-3 bg-var-elevated border border-var-border rounded-lg hover:border-var-glow transition-colors flex items-center justify-center gap-2"
                     >
                       {copied ? (
                         <>
                           <Check className="w-4 h-4 text-green-400" />
-                          Copied!
+                          <span className="text-green-400">Copied!</span>
                         </>
                       ) : (
                         <>
                           <Copy className="w-4 h-4" />
-                          Copy code
+                          <span>Code</span>
                         </>
                       )}
+                    </button>
+                    
+                    <button
+                      onClick={handleCopyLink}
+                      className="flex-1 py-2 px-3 bg-var-elevated border border-var-border rounded-lg hover:border-blue-500 transition-colors flex items-center justify-center gap-2"
+                    >
+                      {copiedLink ? (
+                        <>
+                          <Check className="w-4 h-4 text-green-400" />
+                          <span className="text-green-400">Copied!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Link className="w-4 h-4" />
+                          <span>Link</span>
+                        </>
+                      )}
+                    </button>
+                    
+                    <button
+                      onClick={handleShare}
+                      className="flex-1 py-2 px-3 bg-blue-500 rounded-lg hover:bg-blue-600 transition-colors flex items-center justify-center gap-2"
+                    >
+                      <Share2 className="w-4 h-4" />
+                      <span>Share</span>
                     </button>
                   </div>
                   
                   <p className="text-sm text-gray-500 mb-6">
-                    Your friend enters this code to join. Once they join, you'll both play the same clips and compare results!
+                    Send the link to your friend. Game starts automatically when they join!
                   </p>
 
-                  <button
-                    onClick={handleStartAsPlayer1}
-                    className="w-full py-3 bg-var-glow text-var-dark font-bold rounded-lg hover:bg-var-glow/90"
-                  >
-                    Start Playing
-                  </button>
+                  <div className="w-full py-4 bg-var-elevated border border-var-border rounded-lg flex items-center justify-center gap-3">
+                    <Loader2 className="w-5 h-5 animate-spin text-var-glow" />
+                    <span className="text-gray-300">Waiting for opponent to join...</span>
+                  </div>
                 </div>
               )}
 

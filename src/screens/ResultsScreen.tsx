@@ -1,14 +1,25 @@
 import { motion } from 'framer-motion';
-import { Trophy, Medal, RotateCcw, Home, Check, X, Zap } from 'lucide-react';
+import { Trophy, Medal, RotateCcw, Home, Check, X, Zap, Clock, Copy } from 'lucide-react';
 import { useGameStore } from '@/stores/gameStore';
 import { useClipsContext } from '@/App';
 import { determineWinner } from '@/lib/scoring';
 import { DECISIONS } from '@/types/game';
 import { cn } from '@/lib/utils';
+import { useState } from 'react';
 
 export function ResultsScreen() {
-  const { match, resetGame, startPracticeMatch } = useGameStore();
+  const { match, resetGame, startPracticeMatch, isPlayer1 } = useGameStore();
   const { clips } = useClipsContext();
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyLink = () => {
+    if (match?.shareCode) {
+      const link = `${window.location.origin}?code=${match.shareCode}`;
+      navigator.clipboard.writeText(link);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
 
   if (!match) {
     return (
@@ -17,6 +28,9 @@ export function ResultsScreen() {
       </div>
     );
   }
+
+  const isAsyncMatch = match.mode === 'async';
+  const isWaitingForOpponent = isAsyncMatch && isPlayer1;
 
   const winner = determineWinner(match.playerTotalScore, match.opponentTotalScore);
   const playerWon = winner === 'player';
@@ -40,7 +54,9 @@ export function ResultsScreen() {
             animate={{ scale: 1 }}
             transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
           >
-            {playerWon ? (
+            {isWaitingForOpponent ? (
+              <Clock className="w-20 h-20 mx-auto text-blue-400 mb-4" />
+            ) : playerWon ? (
               <Trophy className="w-20 h-20 mx-auto text-yellow-400 mb-4" />
             ) : isTie ? (
               <Medal className="w-20 h-20 mx-auto text-gray-400 mb-4" />
@@ -51,21 +67,55 @@ export function ResultsScreen() {
           
           <h1 className={cn(
             "font-display text-5xl md:text-7xl tracking-wider",
-            playerWon && "text-yellow-400",
-            isTie && "text-gray-400",
-            !playerWon && !isTie && "text-gray-500"
+            isWaitingForOpponent && "text-blue-400",
+            !isWaitingForOpponent && playerWon && "text-yellow-400",
+            !isWaitingForOpponent && isTie && "text-gray-400",
+            !isWaitingForOpponent && !playerWon && !isTie && "text-gray-500"
           )}>
-            {playerWon ? 'VICTORY!' : isTie ? 'DRAW' : 'DEFEAT'}
+            {isWaitingForOpponent ? 'CHALLENGE SENT!' : playerWon ? 'VICTORY!' : isTie ? 'DRAW' : 'DEFEAT'}
           </h1>
           
           <p className="text-gray-400 mt-2">
-            {playerWon 
-              ? "You outperformed the bot!" 
+            {isWaitingForOpponent 
+              ? "Waiting for your friend to play..." 
+              : playerWon 
+              ? (isAsyncMatch ? "You beat your friend!" : "You outperformed the bot!")
               : isTie 
               ? "Evenly matched!" 
-              : "The bot got the better of you this time"}
+              : (isAsyncMatch ? "Your friend beat you!" : "The bot got the better of you this time")}
           </p>
         </motion.div>
+        
+        {/* Share code for async match (Player 1 waiting) */}
+        {isWaitingForOpponent && match.shareCode && (
+          <motion.div
+            className="bg-blue-500/20 border border-blue-500/50 rounded-xl p-6 mb-8 text-center"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.25 }}
+          >
+            <p className="text-gray-300 mb-3">Share this code with your friend:</p>
+            <div className="text-4xl font-mono font-bold text-blue-400 tracking-widest mb-4">
+              {match.shareCode}
+            </div>
+            <button
+              onClick={handleCopyLink}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+            >
+              {copied ? (
+                <>
+                  <Check className="w-4 h-4" />
+                  Link Copied!
+                </>
+              ) : (
+                <>
+                  <Copy className="w-4 h-4" />
+                  Copy Invite Link
+                </>
+              )}
+            </button>
+          </motion.div>
+        )}
 
         {/* Final Score Card */}
         <motion.div
@@ -99,19 +149,29 @@ export function ResultsScreen() {
 
             {/* Opponent */}
             <div className="text-center flex-1">
-              <div className="text-sm text-gray-400 mb-1">Bot</div>
-              <div className="font-medium text-lg mb-2">{match.opponent.name}</div>
-              <motion.div 
-                className="text-4xl md:text-5xl font-mono font-bold text-gray-400"
-                initial={{ scale: 0 }}
-                animate={{ scale: 1 }}
-                transition={{ delay: 0.6, type: "spring" }}
-              >
-                {match.opponentTotalScore}
-              </motion.div>
-              <div className="text-sm text-gray-500 mt-1">
-                {opponentCorrect}/{match.roundResults.length} correct
+              <div className="text-sm text-gray-400 mb-1">
+                {isAsyncMatch ? 'Friend' : 'Bot'}
               </div>
+              <div className="font-medium text-lg mb-2">{match.opponent.name}</div>
+              {isWaitingForOpponent ? (
+                <div className="text-2xl text-gray-500 py-4">
+                  Waiting...
+                </div>
+              ) : (
+                <>
+                  <motion.div 
+                    className="text-4xl md:text-5xl font-mono font-bold text-gray-400"
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    transition={{ delay: 0.6, type: "spring" }}
+                  >
+                    {match.opponentTotalScore}
+                  </motion.div>
+                  <div className="text-sm text-gray-500 mt-1">
+                    {opponentCorrect}/{match.roundResults.length} correct
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </motion.div>

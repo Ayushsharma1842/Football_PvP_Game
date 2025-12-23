@@ -18,7 +18,7 @@ import { Decision } from '@/types/game';
 export interface FirestoreMatch {
   id: string;
   mode: 'practice' | 'async';
-  status: 'waiting_for_p2' | 'p1_playing' | 'p2_playing' | 'completed';
+  status: 'waiting_for_p2' | 'playing' | 'completed';
   shareCode: string;
   clipIds: string[];
   rulesVersion: string;
@@ -38,6 +38,17 @@ export interface FirestoreMatch {
     submittedAt?: Timestamp;
   };
   winner?: 'player1' | 'player2' | 'tie';
+  
+  // Sync state for real-time multiplayer
+  sync?: {
+    currentRound: number;
+    roundState: 'loading' | 'playing' | 'answering' | 'results' | 'completed';
+    player1VideoReady: boolean;
+    player2VideoReady: boolean;
+    player1ReadyForNext: boolean;
+    player2ReadyForNext: boolean;
+    roundStartTime: number | null; // Timestamp when video should start
+  };
 }
 
 export interface PlayerAnswerDoc {
@@ -105,6 +116,10 @@ export async function joinMatchByCode(
   userId: string,
   playerName: string
 ): Promise<{ matchId: string; match: FirestoreMatch } | null> {
+  console.log('=== FIRESTORE JOIN DEBUG ===');
+  console.log('Looking for shareCode:', shareCode.toUpperCase());
+  console.log('Joiner userId:', userId);
+  
   const matchesRef = collection(db, 'matches');
   const q = query(
     matchesRef, 
@@ -114,28 +129,67 @@ export async function joinMatchByCode(
   
   const snapshot = await getDocs(q);
   
+  console.log('Query results:', snapshot.size, 'matches found');
+  
   if (snapshot.empty) {
+    console.log('No match found with this code and status');
     return null;
   }
   
   const matchDoc = snapshot.docs[0];
   const matchData = matchDoc.data() as FirestoreMatch;
   
+  console.log('Match found:', matchDoc.id);
+  console.log('Match creator (player1.uid):', matchData.player1.uid);
+  console.log('Are they the same?', matchData.player1.uid === userId);
+  
   // Don't let same user join their own match
   if (matchData.player1.uid === userId) {
+    console.log('BLOCKED: Same user trying to join own match');
     throw new Error('Cannot join your own match');
   }
   
-  // Update match with player 2
+  // Update match with player 2 and initialize sync state
   await updateDoc(matchDoc.ref, {
     'player2.uid': userId,
     'player2.name': playerName,
-    'status': 'p1_playing',
+    'status': 'playing',
+    'sync': {
+      currentRound: 0,
+      roundState: 'loading',
+      player1VideoReady: false,
+      player2VideoReady: false,
+      player1ReadyForNext: false,
+      player2ReadyForNext: false,
+      roundStartTime: null,
+    },
   });
+  
+  console.log('Match joined successfully!');
+  
+  // Return updated match data with player2 included
+  const updatedMatch: FirestoreMatch = {
+    ...matchData,
+    id: matchDoc.id,
+    player2: {
+      uid: userId,
+      name: playerName,
+    },
+    status: 'playing',
+    sync: {
+      currentRound: 0,
+      roundState: 'loading',
+      player1VideoReady: false,
+      player2VideoReady: false,
+      player1ReadyForNext: false,
+      player2ReadyForNext: false,
+      roundStartTime: null,
+    },
+  };
   
   return { 
     matchId: matchDoc.id, 
-    match: { ...matchData, id: matchDoc.id } 
+    match: updatedMatch,
   };
 }
 
@@ -181,11 +235,10 @@ export async function submitMatchAnswers(
   const matchSnap = await getDoc(matchRef);
   const matchData = matchSnap.data() as FirestoreMatch;
   
-  let newStatus = matchData.status;
+  let newStatus: 'playing' | 'completed' = matchData.status === 'completed' ? 'completed' : 'playing';
   
-  if (isPlayer1) {
-    newStatus = 'p2_playing';
-  } else {
+  // Only mark as completed when player 2 finishes
+  if (!isPlayer1) {
     newStatus = 'completed';
   }
   
@@ -211,6 +264,188 @@ export async function submitMatchAnswers(
   }
   
   await updateDoc(matchRef, updateData);
+}
+
+// Submit a single round answer immediately (for real-time comparison)
+export async function submitRoundAnswer(
+  matchId: string,
+  isPlayer1: boolean,
+  roundIndex: number,
+  answer: {
+    clipId: string;
+    decision: Decision | null;
+    responseTimeMs: number;
+    timedOut: boolean;
+    score: number;
+  }
+): Promise<void> {
+  const matchRef = doc(db, 'matches', matchId);
+  const playerKey = isPlayer1 ? 'player1' : 'player2';
+  
+  // Get current match data
+  const matchSnap = await getDoc(matchRef);
+  if (!matchSnap.exists()) {
+    throw new Error('Match not found');
+  }
+  
+  const matchData = matchSnap.data() as FirestoreMatch;
+  const currentAnswers = matchData[playerKey]?.answers || [];
+  
+  // Create the new answer object
+  // NOTE: Can't use serverTimestamp() inside arrays, so we use Date.now()
+  const newAnswer: PlayerAnswerDoc = {
+    clipId: answer.clipId,
+    decision: answer.decision,
+    responseTimeMs: answer.responseTimeMs,
+    submittedAt: Timestamp.fromMillis(Date.now()),
+    timedOut: answer.timedOut,
+  };
+  
+  // Update answers array and running score
+  const updatedAnswers = [...currentAnswers];
+  updatedAnswers[roundIndex] = newAnswer;
+  
+  const currentScore = matchData[playerKey]?.totalScore || 0;
+  const newTotalScore = currentScore + answer.score;
+  
+  await updateDoc(matchRef, {
+    [`${playerKey}.answers`]: updatedAnswers,
+    [`${playerKey}.totalScore`]: newTotalScore,
+  });
+  
+  console.log(`Round ${roundIndex + 1} answer saved for ${playerKey}`);
+}
+
+// ==========================================
+// SYNC FUNCTIONS FOR REAL-TIME MULTIPLAYER
+// ==========================================
+
+// Signal that player's video is loaded and ready
+export async function signalVideoReady(
+  matchId: string,
+  isPlayer1: boolean
+): Promise<void> {
+  const matchRef = doc(db, 'matches', matchId);
+  const playerKey = isPlayer1 ? 'player1VideoReady' : 'player2VideoReady';
+  
+  // First, update this player's ready state
+  await updateDoc(matchRef, {
+    [`sync.${playerKey}`]: true,
+  });
+  
+  console.log(`Player ${isPlayer1 ? '1' : '2'} video ready signaled`);
+  
+  // Now read the updated state to check if both are ready
+  const matchSnap = await getDoc(matchRef);
+  if (!matchSnap.exists()) return;
+  
+  const matchData = matchSnap.data() as FirestoreMatch;
+  const sync = matchData.sync;
+  
+  if (!sync) return;
+  
+  // Check if BOTH players are now ready
+  if (sync.player1VideoReady && sync.player2VideoReady && sync.roundState === 'loading') {
+    // Both ready! Set the start time and change state to playing
+    await updateDoc(matchRef, {
+      'sync.roundState': 'playing',
+      'sync.roundStartTime': Date.now(),
+    });
+    console.log('Both players ready! Starting video playback...');
+  }
+}
+
+// Update round state (for transitioning between phases)
+export async function updateRoundState(
+  matchId: string,
+  newState: 'loading' | 'playing' | 'answering' | 'results'
+): Promise<void> {
+  const matchRef = doc(db, 'matches', matchId);
+  await updateDoc(matchRef, {
+    'sync.roundState': newState,
+  });
+}
+
+// Signal that player is ready for next round (done viewing results)
+export async function signalReadyForNextRound(
+  matchId: string,
+  isPlayer1: boolean
+): Promise<void> {
+  const matchRef = doc(db, 'matches', matchId);
+  const playerKey = isPlayer1 ? 'player1ReadyForNext' : 'player2ReadyForNext';
+  
+  // First, update this player's ready state
+  await updateDoc(matchRef, {
+    [`sync.${playerKey}`]: true,
+  });
+  
+  console.log(`Player ${isPlayer1 ? '1' : '2'} ready for next round`);
+  
+  // Now read the updated state to check if both are ready
+  const matchSnap = await getDoc(matchRef);
+  if (!matchSnap.exists()) return;
+  
+  const matchData = matchSnap.data() as FirestoreMatch;
+  const sync = matchData.sync;
+  
+  if (!sync) return;
+  
+  // Check if BOTH players are now ready for next round
+  const bothReady = sync.player1ReadyForNext && sync.player2ReadyForNext;
+  
+  if (bothReady) {
+    const nextRoundIndex = sync.currentRound + 1;
+    const totalRounds = matchData.clipIds.length;
+    
+    if (nextRoundIndex >= totalRounds) {
+      // Match complete
+      await updateDoc(matchRef, {
+        'status': 'completed',
+        'sync.roundState': 'completed',
+      });
+      console.log('Match completed!');
+    } else {
+      // Move to next round - reset all ready states
+      await updateDoc(matchRef, {
+        'sync.currentRound': nextRoundIndex,
+        'sync.roundState': 'loading',
+        'sync.player1VideoReady': false,
+        'sync.player2VideoReady': false,
+        'sync.player1ReadyForNext': false,
+        'sync.player2ReadyForNext': false,
+        'sync.roundStartTime': null,
+      });
+      console.log('Both players ready! Advancing to round', nextRoundIndex + 1);
+    }
+  }
+}
+
+// Advance to next round (reset ready states) - kept for backward compatibility
+export async function advanceToNextRound(
+  matchId: string,
+  nextRoundIndex: number,
+  totalRounds: number
+): Promise<void> {
+  const matchRef = doc(db, 'matches', matchId);
+  
+  if (nextRoundIndex >= totalRounds) {
+    // Match complete
+    await updateDoc(matchRef, {
+      'status': 'completed',
+      'sync.roundState': 'completed',
+    });
+  } else {
+    // Move to next round
+    await updateDoc(matchRef, {
+      'sync.currentRound': nextRoundIndex,
+      'sync.roundState': 'loading',
+      'sync.player1VideoReady': false,
+      'sync.player2VideoReady': false,
+      'sync.player1ReadyForNext': false,
+      'sync.player2ReadyForNext': false,
+      'sync.roundStartTime': null,
+    });
+  }
 }
 
 // Get clips from Firestore
