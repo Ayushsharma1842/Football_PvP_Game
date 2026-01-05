@@ -8,9 +8,16 @@ import { cn } from '@/lib/utils';
 import { useState } from 'react';
 
 export function ResultsScreen() {
-  const { match, resetGame, startPracticeMatch, isPlayer1 } = useGameStore();
+  const { match, resetGame, startPracticeMatch, opponentAnswers, opponentTotalScoreLive } = useGameStore();
   const { clips } = useClipsContext();
   const [copied, setCopied] = useState(false);
+  
+  // Debug logging
+  console.log('=== RESULTS SCREEN DEBUG ===');
+  console.log('opponentAnswers:', opponentAnswers);
+  console.log('opponentAnswers.length:', opponentAnswers?.length);
+  console.log('opponentTotalScoreLive:', opponentTotalScoreLive);
+  console.log('match.opponentTotalScore:', match?.opponentTotalScore);
 
   const handleCopyLink = () => {
     if (match?.shareCode) {
@@ -30,15 +37,32 @@ export function ResultsScreen() {
   }
 
   const isAsyncMatch = match.mode === 'async';
-  const isWaitingForOpponent = isAsyncMatch && isPlayer1;
+  const totalRounds = match.clipSet.length;
+  
+  // For async matches, check if opponent has actually finished all rounds
+  const opponentFinished = isAsyncMatch 
+    ? opponentAnswers.length >= totalRounds 
+    : true; // Practice mode: bot always "finished"
+  
+  const isWaitingForOpponent = isAsyncMatch && !opponentFinished;
 
-  const winner = determineWinner(match.playerTotalScore, match.opponentTotalScore);
+  // Use live opponent score for async matches
+  const actualOpponentScore = isAsyncMatch ? opponentTotalScoreLive : match.opponentTotalScore;
+
+  const winner = determineWinner(match.playerTotalScore, actualOpponentScore);
   const playerWon = winner === 'player';
   const isTie = winner === 'tie';
 
   // Count correct answers
   const playerCorrect = match.roundResults.filter(r => r.playerScore.isCorrect).length;
-  const opponentCorrect = match.roundResults.filter(r => r.opponentScore.isCorrect).length;
+  
+  // For async matches, count opponent correct from opponentAnswers
+  const opponentCorrect = isAsyncMatch
+    ? opponentAnswers.filter((a, i) => {
+        const clip = match.clipSet[i];
+        return clip && a.decision === clip.correctDecision;
+      }).length
+    : match.roundResults.filter(r => r.opponentScore.isCorrect).length;
 
   return (
     <div className="min-h-screen gradient-bg p-4 md:p-8">
@@ -165,10 +189,10 @@ export function ResultsScreen() {
                     animate={{ scale: 1 }}
                     transition={{ delay: 0.6, type: "spring" }}
                   >
-                    {match.opponentTotalScore}
+                    {actualOpponentScore}
                   </motion.div>
                   <div className="text-sm text-gray-500 mt-1">
-                    {opponentCorrect}/{match.roundResults.length} correct
+                    {opponentCorrect}/{totalRounds} correct
                   </div>
                 </>
               )}
@@ -193,6 +217,19 @@ export function ResultsScreen() {
                 ? DECISIONS.find(d => d.value === result.playerAnswer.decision)?.shortLabel 
                 : 'None';
               const correctDecision = DECISIONS.find(d => d.value === result.correctAnswer.correctDecision)?.shortLabel;
+              
+              // For async matches, get opponent answer from opponentAnswers array
+              const opponentAnswer = isAsyncMatch ? opponentAnswers[index] : null;
+              const opponentDecision = isAsyncMatch
+                ? (opponentAnswer?.decision 
+                    ? DECISIONS.find(d => d.value === opponentAnswer.decision)?.shortLabel 
+                    : (isWaitingForOpponent ? '...' : 'None'))
+                : DECISIONS.find(d => d.value === result.opponentAnswer.decision)?.shortLabel || 'None';
+              
+              const clip = match.clipSet[index];
+              const opponentIsCorrect = isAsyncMatch
+                ? (opponentAnswer?.decision === clip?.correctDecision)
+                : result.opponentScore.isCorrect;
 
               return (
                 <motion.div
@@ -245,16 +282,34 @@ export function ResultsScreen() {
 
                   {/* Opponent answer */}
                   <div className="col-span-3 text-center">
-                    <div className="flex items-center justify-center gap-1">
-                      {result.opponentScore.isCorrect ? (
-                        <Check className="w-4 h-4 text-green-400" />
-                      ) : (
-                        <X className="w-4 h-4 text-red-400" />
-                      )}
-                      <span className="text-gray-400">
-                        +{result.opponentScore.points}
-                      </span>
-                    </div>
+                    {isWaitingForOpponent && !opponentAnswer ? (
+                      <span className="text-gray-500">...</span>
+                    ) : (
+                      <>
+                        <div className="flex items-center justify-center gap-1">
+                          {opponentIsCorrect ? (
+                            <Check className="w-4 h-4 text-green-400" />
+                          ) : (
+                            <X className="w-4 h-4 text-red-400" />
+                          )}
+                          <span className={cn(
+                            opponentIsCorrect ? "text-green-400" : "text-red-400"
+                          )}>
+                            {opponentDecision}
+                          </span>
+                        </div>
+                        {isAsyncMatch && opponentAnswer && (
+                          <div className="text-xs text-gray-500">
+                            +{opponentIsCorrect ? 100 : 0}
+                          </div>
+                        )}
+                        {!isAsyncMatch && (
+                          <div className="text-xs text-gray-500">
+                            +{result.opponentScore.points}
+                          </div>
+                        )}
+                      </>
+                    )}
                   </div>
                 </motion.div>
               );

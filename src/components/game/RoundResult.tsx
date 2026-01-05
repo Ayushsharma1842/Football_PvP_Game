@@ -63,6 +63,7 @@ export function RoundResult({ result, onContinue, isAsyncMatch = false }: RoundR
   });
   
   const [timeRemaining, setTimeRemaining] = useState(AUTO_ADVANCE_SECONDS);
+  const [hasSignaledReady, setHasSignaledReady] = useState(false); // Track if we've already signaled
   
   // Watch for opponent answer in async mode
   useEffect(() => {
@@ -99,12 +100,13 @@ export function RoundResult({ result, onContinue, isAsyncMatch = false }: RoundR
     return () => clearInterval(interval);
   }, [phase]);
 
-  // Call onContinue when timer reaches 0
+  // Call onContinue when timer reaches 0 (only once)
   useEffect(() => {
-    if (phase === 'revealed' && timeRemaining <= 0) {
+    if (phase === 'revealed' && timeRemaining <= 0 && !hasSignaledReady) {
+      setHasSignaledReady(true);
       onContinue();
     }
-  }, [timeRemaining, phase, onContinue]);
+  }, [timeRemaining, phase, onContinue, hasSignaledReady]);
 
   const playerDecisionLabel = playerAnswer.decision 
     ? DECISIONS.find(d => d.value === playerAnswer.decision)?.label 
@@ -368,15 +370,21 @@ export function RoundResult({ result, onContinue, isAsyncMatch = false }: RoundR
         {/* Status Footer */}
         <div className="p-6 border-t border-var-border">
           {phase === 'waiting' ? (
-            // Waiting for opponent
+            // Waiting for opponent to answer
             <div className="w-full py-3 px-6 bg-var-card border border-var-border text-gray-500 font-bold rounded-lg text-center flex items-center justify-center gap-2">
               <Loader2 className="w-5 h-5 animate-spin" />
               Waiting for opponent...
             </div>
+          ) : hasSignaledReady ? (
+            // Timer expired, waiting for opponent to also be ready
+            <div className="w-full py-3 px-6 bg-var-card border border-var-border text-gray-500 font-bold rounded-lg text-center flex items-center justify-center gap-2">
+              <Loader2 className="w-5 h-5 animate-spin" />
+              Waiting for opponent to continue...
+            </div>
           ) : (
             // Both answered - show countdown to next round
             <div className="w-full py-3 px-6 bg-var-card border border-var-border text-gray-400 font-medium rounded-lg text-center">
-              Next round in {Math.ceil(timeRemaining)}s...
+              Next round in {Math.ceil(Math.max(0, timeRemaining))}s...
             </div>
           )}
         </div>

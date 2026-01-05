@@ -22,6 +22,8 @@ export function GameScreen() {
     startAnswerWindow,
     signalVideoLoaded,
     canPlayVideo,
+    opponentTotalScoreLive,
+    syncState,
   } = useGameStore();
 
   const currentClip = getCurrentClip();
@@ -147,7 +149,7 @@ export function GameScreen() {
           player={match.player}
           opponent={match.opponent}
           playerScore={match.playerTotalScore}
-          opponentScore={match.opponentTotalScore}
+          opponentScore={match.mode === 'async' ? opponentTotalScoreLive : match.opponentTotalScore}
           currentRound={match.currentRoundIndex + 1}
           totalRounds={match.clipSet.length}
         />
@@ -163,6 +165,8 @@ export function GameScreen() {
               onAllPlaysComplete={handleAllPlaysComplete}
               onVideoLoaded={handleVideoLoaded}
               canPlay={canStartVideo}
+              roundStartTime={match.mode === 'async' ? syncState?.roundStartTime : null}
+              videoDuration={currentClip.durationSec}
             />
             
             {/* Clip Info */}
