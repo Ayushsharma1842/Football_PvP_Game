@@ -163,21 +163,32 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const opponentKey = isPlayer1 ? 'player2' : 'player1';
       const opponentData = firebaseMatch[opponentKey];
       
+      console.log('=== OPPONENT DATA UPDATE ===');
+      console.log('Looking for:', opponentKey);
+      console.log('Opponent data from Firebase:', opponentData);
+      console.log('Opponent answers raw:', opponentData?.answers);
+      console.log('Opponent totalScore:', opponentData?.totalScore);
+      
       if (opponentData) {
         // Handle both array and object formats from Firestore
         let newAnswers = opponentData.answers || [];
         
         // Firestore can return arrays as objects with numeric keys
         if (newAnswers && !Array.isArray(newAnswers)) {
+          console.log('Converting object to array...');
           newAnswers = Object.values(newAnswers);
         }
         
         const newScore = opponentData.totalScore || 0;
         
-        const { opponentAnswers: currentAnswers } = get();
+        console.log('Processed answers:', newAnswers);
+        console.log('Processed score:', newScore);
         
-        // Always update if there's new data
-        if (newAnswers.length > 0 && newAnswers.length !== currentAnswers.length) {
+        const { opponentAnswers: currentAnswers, opponentTotalScoreLive: currentScore } = get();
+        
+        // Update if answers changed or score changed
+        if (newAnswers.length !== currentAnswers.length || newScore !== currentScore) {
+          console.log('*** UPDATING OPPONENT DATA ***');
           set({ 
             opponentAnswers: newAnswers,
             opponentTotalScoreLive: newScore,

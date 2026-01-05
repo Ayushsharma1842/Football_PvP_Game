@@ -9,6 +9,8 @@ interface VideoPlayerProps {
   onAllPlaysComplete?: () => void; // Called after video plays twice
   onVideoLoaded?: () => void; // Called when video metadata is loaded (for sync)
   canPlay?: boolean; // External control: should video start playing?
+  roundStartTime?: number | null; // Timestamp when round started (for sync on tab switch)
+  videoDuration?: number; // Video duration in seconds (for calculating position)
   className?: string;
 }
 
@@ -18,6 +20,8 @@ export function VideoPlayer({
   onAllPlaysComplete,
   onVideoLoaded,
   canPlay = true, // Default to true for backward compatibility (practice mode)
+  roundStartTime,
+  videoDuration,
   className,
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -117,6 +121,51 @@ export function VideoPlayer({
     setHasSignaledLoaded(false);
     setHasStartedPlaying(false);
   }, [src]);
+  
+  // Handle tab visibility change - sync video position when returning to tab
+  useEffect(() => {
+    if (!roundStartTime || !videoDuration || isLocked) return;
+    
+    const handleVisibilityChange = () => {
+      const video = videoRef.current;
+      if (!video || document.hidden || !hasStartedPlaying) return;
+      
+      // Calculate where video should be based on elapsed time
+      const elapsedSeconds = (Date.now() - roundStartTime) / 1000;
+      const singlePlayDuration = videoDuration;
+      const totalPlayDuration = singlePlayDuration * 2; // Video plays twice
+      
+      if (elapsedSeconds >= totalPlayDuration) {
+        // Video should be done - lock it
+        setIsLocked(true);
+        setPlayCount(2);
+        onAllPlaysComplete?.();
+        return;
+      }
+      
+      if (elapsedSeconds >= singlePlayDuration) {
+        // Should be on 2nd play
+        const secondPlayPosition = elapsedSeconds - singlePlayDuration;
+        setCurrentPlay(2);
+        setPlayCount(1);
+        video.currentTime = Math.min(secondPlayPosition, singlePlayDuration - 0.1);
+        
+        // If we haven't called onFirstPlayComplete yet, call it now
+        if (playCount === 0) {
+          onFirstPlayComplete?.();
+        }
+      } else {
+        // Still on 1st play
+        video.currentTime = Math.min(elapsedSeconds, singlePlayDuration - 0.1);
+      }
+      
+      // Resume playing
+      video.play().catch(() => {});
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [roundStartTime, videoDuration, isLocked, hasStartedPlaying, playCount, onFirstPlayComplete, onAllPlaysComplete]);
 
   const toggleMute = () => {
     const video = videoRef.current;
